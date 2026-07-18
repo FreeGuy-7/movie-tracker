@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from app import IST, Listing, debug_log, discord_mention, fetch_listing, format_listing_report, send_discord_text, summarize
+from app import IST, Listing, debug_log, discord_mention, fetch_listing, format_date, format_listing_report, format_showtime, movie_url, send_discord_text, summarize
 
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
@@ -98,6 +98,27 @@ def listing_items(listings: list[Listing]) -> list[tuple[str, str, str]]:
     return sorted((listing.screen_format, listing.venue, showtime) for listing in listings for showtime in listing.showtimes)
 
 
+def format_new_show_alert(trigger: dict, new_items: list[tuple[str, str, str]]) -> str:
+    service = "District" if trigger.get("provider", "district") == "district" else "PVR Cinemas"
+    grouped: dict[str, dict[str, list[str]]] = {}
+    for screen_format, venue, showtime in new_items:
+        grouped.setdefault(screen_format, {}).setdefault(venue, []).append(showtime)
+    lines = [
+        "🚨 **New showtimes added**",
+        f"🎬 **{trigger['name']}**",
+        f"🏢 **Service:** {service}",
+        f"📅 **Date:** {format_date(trigger['date'])} · 📍 **City:** {trigger.get('city_name', trigger.get('city_key', '')).title()}",
+        f"🎟️ **New shows:** {len(new_items)}",
+    ]
+    for screen_format in sorted(grouped):
+        lines.append(f"\n━━ **{screen_format.upper()}** ━━")
+        for venue in sorted(grouped[screen_format]):
+            times = " · ".join(format_showtime(showtime) for showtime in sorted(grouped[screen_format][venue]))
+            lines.append(f"**{venue}**\n↳ {times}")
+    lines.append(f"\n🔗 **Booking link:** {movie_url(trigger)}")
+    return "\n".join(lines)
+
+
 def check(trigger: dict) -> None:
     state = load(STATE_PATH, {})
     try:
@@ -113,9 +134,7 @@ def check(trigger: dict) -> None:
             send_discord_text(run_webhook, format_listing_report(trigger, listings))
         new_show_webhook = os.getenv("DISCORD_NEW_SHOW_WEBHOOK_URL")
         if new_show_webhook and previous and new_items:
-            examples = "\n".join(f"• {screen_format} — {venue}: {showtime}" for screen_format, venue, showtime in new_items[:10])
-            suffix = "\n…" if len(new_items) > 10 else ""
-            send_discord_text(new_show_webhook, f"🚨 **New showtime{'s' if len(new_items) > 1 else ''} added for {trigger['name']}**\n{examples}{suffix}", discord_mention())
+            send_discord_text(new_show_webhook, format_new_show_alert(trigger, new_items), discord_mention())
         state[trigger["id"]] = {"signature": signature, "shows": current_items, "checked_at": now()}
         trigger["last_error"] = None
     except Exception as error:
