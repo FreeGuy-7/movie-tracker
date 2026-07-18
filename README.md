@@ -1,10 +1,8 @@
 # Show Watcher
 
-A lightweight Python web app for watching movie listings. It supports District and PVR Cinemas and runs its own continuous scheduler.
+Lightweight Python 3.11 app for monitoring District and PVR Cinemas movie listings and sending Discord notifications.
 
-## Web dashboard
-
-Create your private configuration once, then run the dashboard:
+## Local setup
 
 ```sh
 python3.11 -m venv .venv
@@ -12,63 +10,91 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 cp .env.example .env
 chmod 600 .env
-# Edit .env: add APP_PASSWORD and the three Discord webhook URLs.
+# Set ADMIN_PASSWORD and SIGNUP_ACCESS_KEY in .env.
 python web.py
 ```
 
-The local virtual environment and Docker image both use Python 3.11. For local troubleshooting only, add `DEBUG_LOG_PATH=debug.log` to `.env`; the setting is intentionally absent from deployment examples, so deployed instances do not create a debug log.
+Open `http://localhost:8080`. The first startup creates the admin account from `ADMIN_USERNAME` and `ADMIN_PASSWORD`. Users sign up with the shared `SIGNUP_ACCESS_KEY` and provide their numeric Discord user ID for new-show mentions.
 
-PVR can return an application-level `500 / 12002` response when the selected date is outside its currently published booking window. The monitor treats that response as no sessions and keeps polling; it is not a network or authentication failure. For example, a date already open for booking returns the normal session payload, while a later unpublished date returns no sessions until PVR opens it.
+The app stores users, sessions, triggers, and listing state in an embedded LMDB database at `DB_PATH` (default `data/database`). It does not use JSON files for active data. The `data/` directory is ignored by Git and must be persisted in deployment. Existing `data/triggers.json` and `data/state.json` files are imported once into the initial admin account when the database is empty.
 
-Open `http://localhost:8080`. Select one or both providers; only the relevant movie URL fields are shown. Add an inclusive start date and optional end date, city location, and a check frequency (minimum five minutes). Bengaluru and Delhi use built-in coordinate defaults, which can be edited. The dashboard creates one independent trigger per provider and date, persists them in `data/triggers.json`, and records listing state in `data/state.json`. Change any existing trigger frequency inline from the Active triggers table. Triggers are automatically removed after their target date passes.
+## Dashboard behavior
 
-## Providers and experience filters
+- Users can add District, PVR, or both platforms in one form.
+- A date range creates one trigger per provider and date. The end date is optional.
+- Two different URLs for the same movie/date remain separate triggers; identical provider/API requests share one backend call.
+- Each user can have at most five active triggers. Expired dates are removed automatically.
+- Users can edit frequency and delete their own triggers.
+- Admins can see every trigger and user, and edit every trigger parameter and owner.
+- District and PVR support `ALL`, `IMAX`, and `4DX` experience filters where the provider supports them.
 
-Choose **District** or **PVR Cinemas** when adding a trigger. Use the public movie page URL, not a copied API request. PVR URLs look like `https://www.pvrcinemas.com/moviesessions/Bengaluru/THE-ODYSSEY/35098`; District URLs include the `frmtid` parameter. The experience filter supports **All experiences**, **IMAX**, and **4DX**. PVR passes the selected experience to its session API; District filters returned sessions before they are stored or notified.
+Use public movie page URLs, not copied API requests or browser cookies. Example URLs:
 
-Configure three separate Discord webhook URLs in `.env`: `DISCORD_STATUS_WEBHOOK_URL` receives the service heartbeat, `DISCORD_TRIGGER_WEBHOOK_URL` receives every trigger-run report, and `DISCORD_NEW_SHOW_WEBHOOK_URL` receives tagged new-show alerts. You may point any of them to the same channel if desired. Trigger reports are grouped by format (such as IMAX or 4DX) and then cinema. District session times are converted to IST. Large reports are sent as consecutive Discord messages so no showtimes are removed. The first successful check establishes a baseline; later newly added showtimes generate a separate tagged alert. The default tag is `@here`. To tag yourself, set `DISCORD_USER_ID` to your numeric Discord user ID; usernames such as `freeguy007` and display names cannot be resolved by a webhook. `DISCORD_MENTION` also accepts a numeric ID or an explicit mention such as `<@123456789012345678>`. The service also sends a running-status heartbeat every 60 minutes by default. For testing, set `HEARTBEAT_MINUTES=1`. `APP_PASSWORD` enables browser Basic Authentication with username `watcher`.
-
-`.env` contains credentials and is ignored by Git. The committed `.env.example` is a safe template with no webhook URL. Docker deliberately does not copy `.env` into its image; use `--env-file` at runtime. On a VM, keep the same values in `/etc/show-watcher.env`, outside the repository, with `sudo chmod 600 /etc/show-watcher.env`.
-
-Do not paste browser cookies, guest tokens, or request IDs into the app. District's anonymous token is generated for each request.
-
-## Deployment
-
-**Recommended: Oracle Cloud Always Free VM.** It supports an always-on process and persistent local files, which this scheduler needs. Oracle currently offers Always Free AMD micro VMs and Ampere A1 capacity (up to 2 OCPUs and 12 GB total), though free-shape capacity can be unavailable in some regions. [Oracle Free Tier](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier.htm) and [Always Free compute limits](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm).
-
-1. Create an Ubuntu Always Free VM and open its web port only through a reverse proxy or VPN; do not expose an unprotected dashboard.
-2. Copy this project to the VM and set `APP_PASSWORD` plus the three Discord webhook URLs in its environment.
-3. Create the Python 3.11 environment with `python3.11 -m venv /opt/movie-tracker/.venv`, install dependencies with `/opt/movie-tracker/.venv/bin/python -m pip install -r requirements.txt`, copy `deploy/show-watcher.service` to `/etc/systemd/system/`, create `/etc/show-watcher.env`, then run `sudo systemctl enable --now show-watcher`.
-4. Keep the `data/` directory on the VM's block volume; it holds triggers and notification state.
-
-Example `/etc/show-watcher.env`:
-
-```sh
-APP_PASSWORD=choose-a-strong-password
-DISCORD_STATUS_WEBHOOK_URL=https://discord.com/api/webhooks/status
-DISCORD_TRIGGER_WEBHOOK_URL=https://discord.com/api/webhooks/trigger-runs
-DISCORD_NEW_SHOW_WEBHOOK_URL=https://discord.com/api/webhooks/new-shows
-PORT=8080
-HEARTBEAT_MINUTES=60
-DISCORD_MENTION=@here
+```text
+https://www.district.in/movies/the-odyssey-movie-tickets-in-bengaluru-MV187151?frmtid=...
+https://www.pvrcinemas.com/moviesessions/Bengaluru/THE-ODYSSEY/35098
 ```
 
-For the simplest managed demo, Render's free web services spin down after 15 minutes of inactivity, so they are not suitable for this continuous scheduler. Its always-on services are paid. [Render pricing overview](https://render.com/articles/how-much-does-cloud-application-hosting-cost-for-small-businesses). A Raspberry Pi or NAS already running at home is the practical zero-extra-cost alternative.
+## Discord
 
-### Docker
-
-Build with `docker build -t show-watcher .`. Run with persistent local storage:
+Set three separate webhook URLs:
 
 ```sh
-docker run -d --restart unless-stopped -p 8080:8080 \
-  --env-file .env \
-  -v "$PWD/data:/app/data" show-watcher
+DISCORD_STATUS_WEBHOOK_URL=  # service heartbeat
+DISCORD_TRIGGER_WEBHOOK_URL= # report from each trigger run
+DISCORD_NEW_SHOW_WEBHOOK_URL= # new show alerts and user mentions
 ```
+
+New-show alerts group sessions by format and cinema, include IST showtimes and the booking link, and combine all affected users into one Discord message. Discord webhooks require numeric user IDs for tags; usernames and display names cannot be resolved automatically. Set `HEARTBEAT_MINUTES=1` for testing, then use a larger value in deployment. Leave `DEBUG_LOG_PATH` unset in deployed environments; local diagnostics can use `DEBUG_LOG_PATH=debug.log`.
 
 ## Configuration
 
-`config.json` remains supported as a one-time bootstrap: its watches are loaded into the dashboard when `data/triggers.json` does not yet exist. Each watch can set `provider` (`district` or `pvr`), `source_url`, and `experience` (`ALL`, `IMAX`, or `4DX`). After the first bootstrap, manage triggers from the UI.
+Important environment variables:
 
-## Extending providers
+```sh
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=choose-a-strong-password
+SIGNUP_ACCESS_KEY=long-random-invite-key
+DB_PATH=data/database
+DATA_DIR=data
+PORT=8080
+COOKIE_SECURE=0 # set 1 behind HTTPS
+```
 
-Provider-specific fetching is isolated in `fetch_listing()`. Add provider adapters that return normalized `Listing` values, then reuse the existing state comparison and Discord notification flow.
+Keep `.env` or the deployment environment file outside Git. Never put Discord webhook URLs, passwords, access keys, cookies, guest tokens, or request IDs in source control.
+
+## Deployment
+
+An always-on small VM is the simplest low-cost option. For a one-month test, a small paid VPS is generally easier than relying on Oracle free-tier capacity. A home machine or Raspberry Pi is free if it is already running.
+
+### systemd on Ubuntu
+
+```sh
+cd /opt
+git clone git@github.com:FreeGuy-7/movie-tracker.git
+cd movie-tracker
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp .env.example /etc/show-watcher.env
+sudo chmod 600 /etc/show-watcher.env
+# Edit /etc/show-watcher.env with secrets and webhook URLs.
+sudo cp deploy/show-watcher.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now show-watcher
+```
+
+The service file should run `WorkingDirectory=/opt/movie-tracker` and `ExecStart=/opt/movie-tracker/.venv/bin/python /opt/movie-tracker/web.py`. Persist `/opt/movie-tracker/data` across restarts and upgrades. Put the dashboard behind HTTPS or a VPN; set `COOKIE_SECURE=1` when HTTPS is enabled.
+
+### Docker
+
+```sh
+docker build -t show-watcher .
+docker run -d --restart unless-stopped -p 8080:8080 \
+  --env-file .env -v "$PWD/data:/app/data" show-watcher
+```
+
+The Docker image uses Python 3.11 and does not copy `.env`. The LMDB directory must be mounted as persistent storage.
+
+## Provider implementation
+
+Provider-specific request parsing remains in `app.py`. Each adapter returns normalized `Listing` values, allowing the shared state comparison and Discord notification logic to stay provider-independent.

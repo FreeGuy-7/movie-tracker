@@ -3,5 +3,5 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py settings.py web.py ./
+COPY app.py database.py settings.py web.py ./
 CMD ["python3", "web.py"]
