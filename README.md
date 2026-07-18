@@ -20,7 +20,7 @@ The local virtual environment and Docker image both use Python 3.11. For local t
 
 PVR can return an application-level `500 / 12002` response when the selected date is outside its currently published booking window. The monitor treats that response as no sessions and keeps polling; it is not a network or authentication failure. For example, a date already open for booking returns the normal session payload, while a later unpublished date returns no sessions until PVR opens it.
 
-Open `http://localhost:8080`. Select one or both providers; only the relevant movie URL fields are shown. Add an inclusive start date and optional end date, city location, and a check frequency (minimum five minutes). Bengaluru and Delhi use built-in coordinate defaults, which can be edited. The dashboard creates one independent trigger per provider and date, persists them in `data/triggers.json`, and records listing state in `data/state.json`. Triggers are automatically removed after their target date passes.
+Open `http://localhost:8080`. Select one or both providers; only the relevant movie URL fields are shown. Add an inclusive start date and optional end date, city location, and a check frequency (minimum five minutes). Bengaluru and Delhi use built-in coordinate defaults, which can be edited. The dashboard creates one independent trigger per provider and date, persists them in `data/triggers.json`, and records listing state in `data/state.json`. Change any existing trigger frequency inline from the Active triggers table. Triggers are automatically removed after their target date passes.
 
 ## Providers and experience filters
 
