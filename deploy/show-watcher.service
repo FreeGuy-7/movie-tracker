@@ -8,7 +8,7 @@ Type=simple
 User=showwatcher
 WorkingDirectory=/opt/movie-tracker
 EnvironmentFile=/etc/show-watcher.env
-ExecStart=/usr/bin/python3 /opt/movie-tracker/web.py
+ExecStart=/opt/movie-tracker/.venv/bin/python /opt/movie-tracker/web.py
 Restart=always
 RestartSec=5
 

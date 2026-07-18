@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from app import Listing, fetch_listing, format_listing_report, send_discord_text, summarize
+from app import Listing, debug_log, fetch_listing, format_listing_report, send_discord_text, summarize
 
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
@@ -75,6 +75,7 @@ def check(trigger: dict) -> None:
     state = load(STATE_PATH, {})
     try:
         listings = summarize(fetch_listing(trigger), trigger)
+        debug_log("trigger_success", trigger_id=trigger.get("id"), provider=trigger.get("provider"), name=trigger.get("name"), date=trigger.get("date"), listing_groups=len(listings), showtimes=sum(len(item.showtimes) for item in listings))
         signature = listing_signature(listings)
         previous = state.get(trigger["id"], {})
         current_items = listing_items(listings)
@@ -92,6 +93,7 @@ def check(trigger: dict) -> None:
         trigger["last_error"] = None
     except Exception as error:
         trigger["last_error"] = str(error)
+        debug_log("trigger_error", trigger_id=trigger.get("id"), provider=trigger.get("provider"), name=trigger.get("name"), date=trigger.get("date"), error=str(error))
     finally:
         trigger["last_checked_at"] = now()
         save(STATE_PATH, state)
@@ -139,6 +141,7 @@ def send_heartbeat() -> None:
 
 
 def scheduler() -> None:
+    debug_log("scheduler_started", data_dir=str(DATA_DIR))
     while True:
         run_due()
         send_heartbeat()

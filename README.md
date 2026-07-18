@@ -1,18 +1,22 @@
 # Show Watcher
 
-A lightweight, dependency-free Python web app for watching movie listings. It currently supports District and runs its own continuous scheduler; BookMyShow/PVR adapters can be added later.
+A lightweight Python web app for watching movie listings. It supports District and PVR Cinemas and runs its own continuous scheduler.
 
 ## Web dashboard
 
 Create your private configuration once, then run the dashboard:
 
 ```sh
-python3 -m pip install -r requirements.txt
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 cp .env.example .env
 chmod 600 .env
 # Edit .env: add APP_PASSWORD and the three Discord webhook URLs.
-python3 web.py
+python web.py
 ```
+
+The local virtual environment and Docker image both use Python 3.11. For local troubleshooting only, add `DEBUG_LOG_PATH=debug.log` to `.env`; the setting is intentionally absent from deployment examples, so deployed instances do not create a debug log.
 
 Open `http://localhost:8080`. Add a District movie URL, target date, city location, and a check frequency (minimum five minutes). The server checks each trigger continuously, persists it in `data/triggers.json`, and records listing state in `data/state.json`.
 
@@ -32,7 +36,7 @@ Do not paste browser cookies, guest tokens, or request IDs into the app. Distric
 
 1. Create an Ubuntu Always Free VM and open its web port only through a reverse proxy or VPN; do not expose an unprotected dashboard.
 2. Copy this project to the VM and set `APP_PASSWORD` plus the three Discord webhook URLs in its environment.
-3. Copy `deploy/show-watcher.service` to `/etc/systemd/system/`, create `/etc/show-watcher.env`, then run `sudo systemctl enable --now show-watcher`.
+3. Create the Python 3.11 environment with `python3.11 -m venv /opt/movie-tracker/.venv`, install dependencies with `/opt/movie-tracker/.venv/bin/python -m pip install -r requirements.txt`, copy `deploy/show-watcher.service` to `/etc/systemd/system/`, create `/etc/show-watcher.env`, then run `sudo systemctl enable --now show-watcher`.
 4. Keep the `data/` directory on the VM's block volume; it holds triggers and notification state.
 
 Example `/etc/show-watcher.env`:

@@ -2,6 +2,8 @@ config.json
 state/
 data/
 __pycache__/
+.venv/
+*.log
 .DS_Store
 .env
 .env.*

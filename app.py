@@ -39,6 +39,20 @@ SHOWTIME_KEYS = {"showtimes", "show_times", "shows", "sessions", "timings", "sho
 VENUE_KEYS = {"cinema_name", "cinemaname", "venue_name", "venuename", "theatre_name", "theatrename"}
 
 
+def debug_log(event: str, **details: Any) -> None:
+    path = os.getenv("DEBUG_LOG_PATH", "").strip()
+    if not path:
+        return
+    try:
+        record = {"time": datetime.now(timezone.utc).isoformat(), "event": event, **details}
+        log_path = Path(path)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, default=str) + "\n")
+    except OSError:
+        pass
+
+
 @dataclass(frozen=True)
 class Listing:
     venue: str
@@ -63,7 +77,7 @@ def api_parameters(watch: dict[str, Any]) -> dict[str, str]:
         raise ValueError("district_url must contain a frmtid query parameter")
 
     path_parts = source.path.rstrip("/").split("-")
-    content_id = next((part.removeprefix("MV") for part in reversed(path_parts) if part.startswith("MV")), None)
+    content_id = next((part[2:] for part in reversed(path_parts) if part.startswith("MV")), None)
     if not content_id:
         raise ValueError("district_url path must end with a movie ID such as -MV187151")
 
@@ -139,10 +153,14 @@ def fetch_district_listing(watch: dict[str, Any]) -> dict[str, Any]:
     )
     try:
         with urlopen(request, timeout=20, context=TLS_CONTEXT) as response:
-            return json.loads(response.read().decode("utf-8"))
+            payload = json.loads(response.read().decode("utf-8"))
+            debug_log("district_response", date=watch.get("date"), city=watch.get("city_key"), status=response.status, root_keys=sorted(payload) if isinstance(payload, dict) else type(payload).__name__)
+            return payload
     except HTTPError as error:
+        debug_log("district_http_error", date=watch.get("date"), city=watch.get("city_key"), status=error.code)
         raise RuntimeError(f"District returned HTTP {error.code}. The anonymous token is generated automatically; do not add browser cookies to the config.") from error
     except (URLError, TimeoutError, json.JSONDecodeError) as error:
+        debug_log("district_request_error", date=watch.get("date"), city=watch.get("city_key"), error=str(error))
         raise RuntimeError(f"Unable to retrieve District listings: {error}") from error
 
 
@@ -169,10 +187,16 @@ def fetch_pvr_listing(watch: dict[str, Any]) -> dict[str, Any]:
     )
     try:
         with urlopen(request, timeout=20, context=TLS_CONTEXT) as response:
-            return json.loads(response.read().decode("utf-8"))
+            payload = json.loads(response.read().decode("utf-8"))
+            output = payload.get("output") if isinstance(payload, dict) else None
+            sessions = output.get("movieCinemaSessions") if isinstance(output, dict) else None
+            debug_log("pvr_response", date=watch.get("date"), city=parameters["city"], movie_id=parameters["mid"], status=response.status, api_message=payload.get("msg") if isinstance(payload, dict) else None, session_count=len(sessions or []) if isinstance(sessions, list) else 0)
+            return payload
     except HTTPError as error:
+        debug_log("pvr_http_error", date=watch.get("date"), city=parameters["city"], movie_id=parameters["mid"], status=error.code)
         raise RuntimeError(f"PVR returned HTTP {error.code}.") from error
     except (URLError, TimeoutError, json.JSONDecodeError) as error:
+        debug_log("pvr_request_error", date=watch.get("date"), city=parameters["city"], movie_id=parameters["mid"], error=str(error))
         if certifi is None and "CERTIFICATE_VERIFY_FAILED" in str(error):
             raise RuntimeError("PVR HTTPS verification failed. Install dependencies with: python3 -m pip install -r requirements.txt") from error
         raise RuntimeError(f"Unable to retrieve PVR listings: {error}") from error
@@ -218,7 +242,13 @@ def summarize(payload: dict[str, Any], watch: dict[str, Any] | None = None) -> l
 def summarize_district(payload: dict[str, Any], experience: str) -> list[Listing]:
     district_listings: list[Listing] = []
     page_data = payload.get("pageData", {})
-    screen_formats = json.loads(payload.get("meta", {}).get("entityMetaData", {}).get("screen_format_dict", "{}"))
+    if not isinstance(page_data, dict):
+        return []
+    raw_screen_formats = payload.get("meta", {}).get("entityMetaData", {}).get("screen_format_dict", "{}")
+    try:
+        screen_formats = json.loads(raw_screen_formats) if isinstance(raw_screen_formats, str) else (raw_screen_formats or {})
+    except json.JSONDecodeError:
+        screen_formats = {}
     for cinema in page_data.get("nearbyCinemas", []) + page_data.get("farCinemas", []):
         venue = cinema.get("cinemaInfo", {}).get("name", "Unknown venue")
         cinema_formats = screen_formats.get(str(cinema.get("id")), [])
@@ -245,13 +275,23 @@ def summarize_district(payload: dict[str, Any], experience: str) -> list[Listing
 
 def summarize_pvr(payload: dict[str, Any], experience: str) -> list[Listing]:
     listings: list[Listing] = []
-    cinemas = payload.get("output", {}).get("movieCinemaSessions", [])
+    output = payload.get("output")
+    if not isinstance(output, dict):
+        return []
+    cinemas = output.get("movieCinemaSessions") or []
     for cinema_session in cinemas:
-        venue = cinema_session.get("cinema", {}).get("name", "Unknown venue")
+        if not isinstance(cinema_session, dict):
+            continue
+        cinema = cinema_session.get("cinema") or {}
+        venue = cinema.get("name", "Unknown venue") if isinstance(cinema, dict) else "Unknown venue"
         grouped: dict[str, list[str]] = {}
-        for experience_session in cinema_session.get("experienceSessions", []):
+        for experience_session in cinema_session.get("experienceSessions") or []:
+            if not isinstance(experience_session, dict):
+                continue
             experience_name = str(experience_session.get("experience", "Standard"))
-            for show in experience_session.get("shows", []):
+            for show in experience_session.get("shows") or []:
+                if not isinstance(show, dict):
+                    continue
                 screen_format = normalize_screen_format(str(show.get("screenType") or show.get("filmFormat") or experience_name))
                 if matches_experience(f"{experience_name} {screen_format}", experience):
                     showtime = show.get("showTime")
