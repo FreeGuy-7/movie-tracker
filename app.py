@@ -35,6 +35,12 @@ DISTRICT_API_URL = "https://www.district.in/gw/consumer/movies/v5/movie"
 PVR_API_URL = "https://api3.pvrcinemas.com/api/v1/booking/content/msessions"
 IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where()) if certifi else ssl.create_default_context()
+PVR_CITY_NAMES = {
+    "bengaluru": "Bengaluru",
+    "bangalore": "Bengaluru",
+    "delhi": "Delhi",
+    "new delhi": "New Delhi",
+}
 SHOWTIME_KEYS = {"showtimes", "show_times", "shows", "sessions", "timings", "showtime"}
 VENUE_KEYS = {"cinema_name", "cinemaname", "venue_name", "venuename", "theatre_name", "theatrename"}
 
@@ -107,8 +113,10 @@ def pvr_parameters(watch: dict[str, Any]) -> dict[str, Any]:
     parts = [unquote(part) for part in source.path.split("/") if part]
     if len(parts) < 4 or not parts[-1].isdigit():
         raise ValueError("PVR URL must end with its numeric movie ID, such as /35098")
+    city = str(watch.get("city_name") or parts[-3]).strip()
+    city = PVR_CITY_NAMES.get(city.casefold(), city)
     return {
-        "city": watch.get("city_name") or parts[-3],
+        "city": city,
         "mid": parts[-1],
         "experience": watch.get("experience", "ALL"),
         "specialTag": "ALL",
