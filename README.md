@@ -9,13 +9,13 @@ Create your private configuration once, then run the dashboard:
 ```sh
 cp .env.example .env
 chmod 600 .env
-# Edit .env: add APP_PASSWORD and DISCORD_WEBHOOK_URL.
+# Edit .env: add APP_PASSWORD and the three Discord webhook URLs.
 python3 web.py
 ```
 
 Open `http://localhost:8080`. Add a District movie URL, target date, city location, and a check frequency (minimum five minutes). The server checks each trigger continuously, persists it in `data/triggers.json`, and records listing state in `data/state.json`.
 
-Every successful trigger run sends a report grouped by format (such as IMAX or 4DX) and then cinema. District session times are converted to IST. Large reports are sent as consecutive Discord messages so no showtimes are removed. The first successful check establishes a baseline; later newly added showtimes generate a separate tagged alert. The default tag is `@here`; set `DISCORD_MENTION` to `<@your-user-id>` or a role mention to target a specific recipient. The service also sends a running-status heartbeat every 60 minutes by default. For testing, set `HEARTBEAT_MINUTES=1`. `APP_PASSWORD` enables browser Basic Authentication with username `watcher`.
+Configure three separate Discord webhook URLs in `.env`: `DISCORD_STATUS_WEBHOOK_URL` receives the service heartbeat, `DISCORD_TRIGGER_WEBHOOK_URL` receives every trigger-run report, and `DISCORD_NEW_SHOW_WEBHOOK_URL` receives tagged new-show alerts. You may point any of them to the same channel if desired. Trigger reports are grouped by format (such as IMAX or 4DX) and then cinema. District session times are converted to IST. Large reports are sent as consecutive Discord messages so no showtimes are removed. The first successful check establishes a baseline; later newly added showtimes generate a separate tagged alert. The default tag is `@here`; set `DISCORD_MENTION` to `<@your-user-id>` or a role mention to target a specific recipient. The service also sends a running-status heartbeat every 60 minutes by default. For testing, set `HEARTBEAT_MINUTES=1`. `APP_PASSWORD` enables browser Basic Authentication with username `watcher`.
 
 `.env` contains credentials and is ignored by Git. The committed `.env.example` is a safe template with no webhook URL. Docker deliberately does not copy `.env` into its image; use `--env-file` at runtime. On a VM, keep the same values in `/etc/show-watcher.env`, outside the repository, with `sudo chmod 600 /etc/show-watcher.env`.
 
@@ -26,7 +26,7 @@ Do not paste browser cookies, guest tokens, or request IDs into the app. Distric
 **Recommended: Oracle Cloud Always Free VM.** It supports an always-on process and persistent local files, which this scheduler needs. Oracle currently offers Always Free AMD micro VMs and Ampere A1 capacity (up to 2 OCPUs and 12 GB total), though free-shape capacity can be unavailable in some regions. [Oracle Free Tier](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier.htm) and [Always Free compute limits](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm).
 
 1. Create an Ubuntu Always Free VM and open its web port only through a reverse proxy or VPN; do not expose an unprotected dashboard.
-2. Copy this project to the VM and set `APP_PASSWORD` and `DISCORD_WEBHOOK_URL` in its environment.
+2. Copy this project to the VM and set `APP_PASSWORD` plus the three Discord webhook URLs in its environment.
 3. Copy `deploy/show-watcher.service` to `/etc/systemd/system/`, create `/etc/show-watcher.env`, then run `sudo systemctl enable --now show-watcher`.
 4. Keep the `data/` directory on the VM's block volume; it holds triggers and notification state.
 
@@ -34,7 +34,9 @@ Example `/etc/show-watcher.env`:
 
 ```sh
 APP_PASSWORD=choose-a-strong-password
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+DISCORD_STATUS_WEBHOOK_URL=https://discord.com/api/webhooks/status
+DISCORD_TRIGGER_WEBHOOK_URL=https://discord.com/api/webhooks/trigger-runs
+DISCORD_NEW_SHOW_WEBHOOK_URL=https://discord.com/api/webhooks/new-shows
 PORT=8080
 HEARTBEAT_MINUTES=60
 DISCORD_MENTION=@here

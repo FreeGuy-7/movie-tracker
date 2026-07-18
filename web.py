@@ -80,13 +80,14 @@ def check(trigger: dict) -> None:
         current_items = listing_items(listings)
         previous_items = {tuple(item) for item in previous.get("shows", [])}
         new_items = [item for item in current_items if item not in previous_items]
-        webhook = os.getenv("DISCORD_WEBHOOK_URL")
-        if webhook:
-            send_discord_text(webhook, format_listing_report(trigger, listings))
-            if previous and new_items:
-                examples = "\n".join(f"• {screen_format} — {venue}: {showtime}" for screen_format, venue, showtime in new_items[:10])
-                suffix = "\n…" if len(new_items) > 10 else ""
-                send_discord_text(webhook, f"🚨 **New showtime{'s' if len(new_items) > 1 else ''} added for {trigger['name']}**\n{examples}{suffix}", os.getenv("DISCORD_MENTION", "@here"))
+        run_webhook = os.getenv("DISCORD_TRIGGER_WEBHOOK_URL")
+        if run_webhook:
+            send_discord_text(run_webhook, format_listing_report(trigger, listings))
+        new_show_webhook = os.getenv("DISCORD_NEW_SHOW_WEBHOOK_URL")
+        if new_show_webhook and previous and new_items:
+            examples = "\n".join(f"• {screen_format} — {venue}: {showtime}" for screen_format, venue, showtime in new_items[:10])
+            suffix = "\n…" if len(new_items) > 10 else ""
+            send_discord_text(new_show_webhook, f"🚨 **New showtime{'s' if len(new_items) > 1 else ''} added for {trigger['name']}**\n{examples}{suffix}", os.getenv("DISCORD_MENTION", "@here"))
         state[trigger["id"]] = {"signature": signature, "shows": current_items, "checked_at": now()}
         trigger["last_error"] = None
     except Exception as error:
@@ -125,7 +126,7 @@ def send_heartbeat() -> None:
     interval = max(1, int(os.getenv("HEARTBEAT_MINUTES", "60"))) * 60
     if time.time() - LAST_HEARTBEAT < interval:
         return
-    webhook = os.getenv("DISCORD_WEBHOOK_URL")
+    webhook = os.getenv("DISCORD_STATUS_WEBHOOK_URL")
     if not webhook:
         return
     items = triggers()
