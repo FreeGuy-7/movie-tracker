@@ -172,7 +172,16 @@ def fetch_district_listing(watch: dict[str, Any]) -> dict[str, Any]:
     )
     try:
         with urlopen(request, timeout=20, context=TLS_CONTEXT) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            body = response.read()
+            if response.status == 204 or not body:
+                debug_log("district_no_content", date=watch.get("date"), city=watch.get("city_key"), status=response.status)
+                return {"pageData": {"nearbyCinemas": [], "farCinemas": []}}
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                content_type = response.headers.get("content-type", "unknown")
+                debug_log("district_invalid_response", date=watch.get("date"), city=watch.get("city_key"), status=response.status, content_type=content_type, body_preview=body[:200].decode("utf-8", "replace"))
+                raise RuntimeError(f"District returned a non-JSON response (HTTP {response.status}, content type {content_type}).") from error
             debug_log("district_response", date=watch.get("date"), city=watch.get("city_key"), status=response.status, root_keys=sorted(payload) if isinstance(payload, dict) else type(payload).__name__)
             return payload
     except HTTPError as error:
