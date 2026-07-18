@@ -4,9 +4,20 @@ A lightweight, dependency-free Python web app for watching movie listings. It cu
 
 ## Web dashboard
 
-Run `python3 web.py`, then open `http://localhost:8080`. Add a District movie URL, target date, city location, and a check frequency (minimum five minutes). The server checks each trigger continuously, persists it in `data/triggers.json`, and records listing state in `data/state.json`.
+Create your private configuration once, then run the dashboard:
 
-Set `DISCORD_WEBHOOK_URL` before starting the server to enable notifications. Every successful trigger run sends a report grouped by format (such as IMAX or 4DX) and then cinema. The first successful check establishes a baseline; later newly added showtimes generate a separate tagged alert. The default tag is `@here`; set `DISCORD_MENTION` to `<@your-user-id>` or a role mention to target a specific recipient. The service also sends a running-status heartbeat every 60 minutes by default. For testing, set `HEARTBEAT_MINUTES=1`. Set `APP_PASSWORD` before exposing the dashboard publicly; it enables browser Basic Authentication with username `watcher`.
+```sh
+cp .env.example .env
+chmod 600 .env
+# Edit .env: add APP_PASSWORD and DISCORD_WEBHOOK_URL.
+python3 web.py
+```
+
+Open `http://localhost:8080`. Add a District movie URL, target date, city location, and a check frequency (minimum five minutes). The server checks each trigger continuously, persists it in `data/triggers.json`, and records listing state in `data/state.json`.
+
+Every successful trigger run sends a report grouped by format (such as IMAX or 4DX) and then cinema. The first successful check establishes a baseline; later newly added showtimes generate a separate tagged alert. The default tag is `@here`; set `DISCORD_MENTION` to `<@your-user-id>` or a role mention to target a specific recipient. The service also sends a running-status heartbeat every 60 minutes by default. For testing, set `HEARTBEAT_MINUTES=1`. `APP_PASSWORD` enables browser Basic Authentication with username `watcher`.
+
+`.env` contains credentials and is ignored by Git. The committed `.env.example` is a safe template with no webhook URL. Docker deliberately does not copy `.env` into its image; use `--env-file` at runtime. On a VM, keep the same values in `/etc/show-watcher.env`, outside the repository, with `sudo chmod 600 /etc/show-watcher.env`.
 
 Do not paste browser cookies, guest tokens, or request IDs into the app. District's anonymous token is generated for each request.
 
@@ -37,8 +48,7 @@ Build with `docker build -t show-watcher .`. Run with persistent local storage:
 
 ```sh
 docker run -d --restart unless-stopped -p 8080:8080 \
-  -e APP_PASSWORD='choose-a-strong-password' \
-  -e DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...' \
+  --env-file .env \
   -v "$PWD/data:/app/data" show-watcher
 ```
 

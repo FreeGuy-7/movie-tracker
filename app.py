@@ -19,6 +19,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
+from settings import load_environment
+
+
+load_environment()
+
 
 API_URL = "https://www.district.in/gw/consumer/movies/v5/movie"
 SHOWTIME_KEYS = {"showtimes", "show_times", "shows", "sessions", "timings", "showtime"}
