@@ -12,7 +12,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -26,6 +26,7 @@ load_environment()
 
 
 API_URL = "https://www.district.in/gw/consumer/movies/v5/movie"
+IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 SHOWTIME_KEYS = {"showtimes", "show_times", "shows", "sessions", "timings", "showtime"}
 VENUE_KEYS = {"cinema_name", "cinemaname", "venue_name", "venuename", "theatre_name", "theatrename"}
 
@@ -174,30 +175,78 @@ def send_discord(webhook: str, watch: dict[str, Any], listings: list[Listing]) -
 
 
 def format_listing_report(watch: dict[str, Any], listings: list[Listing]) -> str:
-    lines = [f"**{watch['name']} — {watch['date']}**", f"City: {watch['city_key'].title()}"]
+    showtime_count = sum(len(listing.showtimes) for listing in listings)
+    cinema_count = len({listing.venue for listing in listings})
+    lines = [
+        f"🎬 **{watch['name']}**",
+        f"📅 {format_date(watch['date'])} · 📍 {watch['city_key'].title()}",
+        f"{cinema_count} cinema{'s' if cinema_count != 1 else ''} · {showtime_count} showtime{'s' if showtime_count != 1 else ''}",
+    ]
     grouped: dict[str, list[Listing]] = {}
     for listing in listings:
         grouped.setdefault(listing.screen_format, []).append(listing)
     if not grouped:
-        lines.append("No showtimes are listed yet.")
+        lines.append("\nNo showtimes are listed yet.")
     for screen_format in sorted(grouped):
-        lines.append(f"\n**{screen_format}**")
+        lines.append(f"\n━━ **{screen_format.upper()}** ━━")
         for listing in sorted(grouped[screen_format], key=lambda item: item.venue):
-            lines.append(f"• **{listing.venue}**: {', '.join(listing.showtimes)}")
-    lines.append(f"\n{watch['district_url']}")
-    message = "\n".join(lines)
-    return message if len(message) <= 1900 else f"{message[:1890]}\n…"
+            times = " · ".join(format_showtime(showtime) for showtime in listing.showtimes)
+            lines.append(f"**{listing.venue}**\n↳ {times}")
+    lines.append(f"\n🔗 {watch['district_url']}")
+    return "\n".join(lines)
+
+
+def format_date(value: str) -> str:
+    try:
+        return datetime.fromisoformat(value).strftime("%a, %-d %b %Y")
+    except ValueError:
+        return value
+
+
+def format_showtime(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        local = parsed.astimezone(IST)
+        hour = local.hour % 12 or 12
+        period = "AM" if local.hour < 12 else "PM"
+        return f"{hour}:{local.minute:02d} {period} IST"
+    except ValueError:
+        return value
 
 
 def send_discord_text(webhook: str, message: str, mention: str = "") -> None:
-    content = f"{mention}\n{message}".strip()
-    payload: dict[str, Any] = {"content": content}
-    if mention:
-        payload["allowed_mentions"] = {"parse": ["users", "roles", "everyone"]}
-    body = json.dumps(payload).encode()
-    request = Request(webhook, data=body, headers={"Content-Type": "application/json", "User-Agent": "show-listing-monitor/1.0"})
-    with urlopen(request, timeout=20):
-        pass
+    for index, chunk in enumerate(discord_chunks(message)):
+        content = f"{mention}\n{chunk}".strip() if index == 0 else chunk
+        payload: dict[str, Any] = {"content": content}
+        if mention and index == 0:
+            payload["allowed_mentions"] = {"parse": ["users", "roles", "everyone"]}
+        body = json.dumps(payload).encode()
+        request = Request(webhook, data=body, headers={"Content-Type": "application/json", "User-Agent": "show-listing-monitor/1.0"})
+        with urlopen(request, timeout=20):
+            pass
+
+
+def discord_chunks(message: str, limit: int = 1900) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for line in message.splitlines():
+        while len(line) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit and current:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks or ["No report content available."]
 
 
 def run(config: dict[str, Any], state_path: Path, notify: bool) -> int:
