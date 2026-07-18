@@ -11,13 +11,13 @@ import os
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from app import Listing, debug_log, discord_mention, fetch_listing, format_listing_report, send_discord_text, summarize
+from app import IST, Listing, debug_log, discord_mention, fetch_listing, format_listing_report, send_discord_text, summarize
 
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
@@ -46,11 +46,34 @@ def save(path: Path, value: object) -> None:
 
 
 def triggers() -> list[dict]:
-    return load(TRIGGERS_PATH, [])  # type: ignore[return-value]
+    items = load(TRIGGERS_PATH, [])  # type: ignore[assignment]
+    active = [item for item in items if not trigger_expired(item)]
+    if len(active) != len(items):
+        save_triggers(active)
+        debug_log("expired_triggers_removed", removed=len(items) - len(active))
+    return active  # type: ignore[return-value]
 
 
 def save_triggers(items: list[dict]) -> None:
     save(TRIGGERS_PATH, items)
+
+
+def trigger_expired(trigger: dict, current_date: date | None = None) -> bool:
+    try:
+        target_date = date.fromisoformat(str(trigger["date"]))
+    except (KeyError, TypeError, ValueError):
+        return False
+    return target_date < (current_date or datetime.now(IST).date())
+
+
+def trigger_dates(start_value: str, end_value: str) -> list[str]:
+    start = date.fromisoformat(start_value)
+    end = date.fromisoformat(end_value)
+    if end < start:
+        raise ValueError("End date must be on or after the start date")
+    if (end - start).days > 366:
+        raise ValueError("Date range cannot exceed 367 days")
+    return [(start + timedelta(days=offset)).isoformat() for offset in range((end - start).days + 1)]
 
 
 def bootstrap() -> None:
@@ -164,7 +187,8 @@ body{{max-width:960px;margin:40px auto;padding:0 18px;font:16px system-ui;color:
 <label class=wide>District movie page URL<input type=url name=district_url placeholder='https://www.district.in/movies/...'></label><label class=wide>PVR movie page URL<input type=url name=pvr_url placeholder='https://www.pvrcinemas.com/moviesessions/...'></label>
 <label>Experience filter<select name=experience><option value=ALL>All experiences</option><option value=IMAX>IMAX</option><option value=4DX>4DX</option></select></label><label>City<select id=city-choice name=city_choice onchange='updateCity()'><option value=bengaluru>Bengaluru</option><option value=delhi>Delhi</option><option value=other>Other</option></select></label>
 <label class=wide id=city-custom>Custom city<input name=city_custom placeholder='Enter city name or city key'></label>
-<label>Movie name<input required name=name placeholder='The Odyssey'></label><label>Target date<input required type=date name=date></label>
+<label>Movie name<input required name=name placeholder='The Odyssey'></label><label>Start date<input required type=date name=start_date></label>
+<label>End date<input required type=date name=end_date></label>
 <label>Frequency (minutes)<input required type=number min=5 name=frequency_minutes value=120></label><div></div>
 <label>Latitude<input required id=latitude type=number step=any name=latitude placeholder='Use current location or enter manually'></label><label>Longitude<input required id=longitude type=number step=any name=longitude placeholder='Use current location or enter manually'></label>
 <div class=wide id=location-note>Requesting your current location to prefill coordinates…</div><div class=wide><button>Add trigger(s)</button></div></form></section><section class=card><h2>Active triggers</h2><table><thead><tr><th>Movie / schedule</th><th>City</th><th>Last check</th><th>Status</th><th></th></tr></thead><tbody>{rows}</tbody></table></section><script>function updateCity(){{const other=document.getElementById('city-choice').value==='other';const custom=document.getElementById('city-custom');custom.style.display=other?'grid':'none';custom.querySelector('input').required=other}}function setLocationNote(message){{document.getElementById('location-note').textContent=message}}if(navigator.geolocation){{navigator.geolocation.getCurrentPosition(position=>{{const latitude=document.getElementById('latitude'),longitude=document.getElementById('longitude');if(!latitude.value)latitude.value=position.coords.latitude.toFixed(6);if(!longitude.value)longitude.value=position.coords.longitude.toFixed(6);setLocationNote('Coordinates prefilled from your current location. You can edit them.')}},()=>setLocationNote('Location was not shared. Enter latitude and longitude manually.'),{{enableHighAccuracy:false,timeout:10000}})}}else{{setLocationNote('Location is not supported by this browser. Enter coordinates manually.')}}</script></body></html>"""
@@ -213,12 +237,16 @@ class Handler(BaseHTTPRequestHandler):
                     city = fields.get("city_custom", "") if fields.get("city_choice") == "other" else fields.get("city_choice", "")
                     if not city:
                         raise ValueError("Select a city or enter a custom city")
+                    target_dates = trigger_dates(fields["start_date"], fields["end_date"])
+                    added = 0
                     for provider in providers:
                         source_url = fields.get(f"{provider}_url", "")
                         if not source_url:
                             raise ValueError(f"Provide the {provider.title()} movie page URL")
-                        items.append({"id": str(uuid.uuid4()), "provider": provider, "name": fields["name"], "source_url": source_url, "city_key": city.lower(), "city_name": city, "date": fields["date"], "experience": fields.get("experience", "ALL").upper(), "latitude": float(fields["latitude"]), "longitude": float(fields["longitude"]), "frequency_minutes": frequency, "last_checked_at": None, "last_error": None})
-                    message = f"{len(providers)} trigger{'s' if len(providers) != 1 else ''} added. They will be checked within 15 seconds."
+                        for target_date in target_dates:
+                            items.append({"id": str(uuid.uuid4()), "provider": provider, "name": fields["name"], "source_url": source_url, "city_key": city.lower(), "city_name": city, "date": target_date, "experience": fields.get("experience", "ALL").upper(), "latitude": float(fields["latitude"]), "longitude": float(fields["longitude"]), "frequency_minutes": frequency, "last_checked_at": None, "last_error": None})
+                            added += 1
+                    message = f"{added} trigger{'s' if added != 1 else ''} added for {len(target_dates)} date{'s' if len(target_dates) != 1 else ''}. They will be checked within 15 seconds."
                 elif self.path == "/delete":
                     items = [item for item in items if item["id"] != fields.get("id")]
                     message = "Trigger deleted."
