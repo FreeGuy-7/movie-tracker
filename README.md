@@ -23,7 +23,7 @@ The app stores users, sessions, triggers, and listing state in an embedded LMDB 
 - Users can add District, PVR, or both platforms in one form.
 - A date range creates one trigger per provider and date. The end date is optional.
 - Two different URLs for the same movie/date remain separate triggers; identical provider/API requests share one backend call.
-- Each user can have at most five active triggers. Expired dates are removed automatically.
+- Regular users can have at most five active triggers; admins are not limited. Expired dates are removed automatically.
 - Users can edit frequency and delete their own triggers.
 - Admins can see every trigger and user, and edit every trigger parameter and owner.
 - District and PVR support `ALL`, `IMAX`, and `4DX` experience filters where the provider supports them.
