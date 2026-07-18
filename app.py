@@ -340,6 +340,8 @@ def format_listing_report(watch: dict[str, Any], listings: list[Listing]) -> str
         for listing in sorted(grouped[screen_format], key=lambda item: item.venue):
             times = " · ".join(format_showtime(showtime) for showtime in listing.showtimes)
             lines.append(f"**{listing.venue}**\n↳ {times}")
+    if not listings and watch.get("provider") == "pvr":
+        lines.append("\nPVR has not published sessions for this date yet. The trigger will keep checking automatically.")
     lines.append(f"\n🔗 {movie_url(watch)}")
     return "\n".join(lines)
 
