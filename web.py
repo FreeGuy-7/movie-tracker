@@ -154,15 +154,17 @@ def page(items: list[dict], notice: str = "") -> str:
     ) or "<tr><td colspan='5'>No triggers yet.</td></tr>"
     return f"""<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>
 <title>Show Watcher</title><style>
-body{{max-width:960px;margin:40px auto;padding:0 18px;font:16px system-ui;color:#172033;background:#f7f8fc}}h1{{margin-bottom:4px}}.card{{background:white;border:1px solid #e4e7ef;border-radius:12px;padding:22px;margin:22px 0;box-shadow:0 1px 3px #00000008}}form.grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}}label{{font-size:13px;font-weight:650;display:grid;gap:5px}}input,select{{padding:10px;border:1px solid #b9c0cf;border-radius:7px;font:inherit}}.wide{{grid-column:1/-1}}button{{background:#3b5bdb;color:white;border:0;border-radius:7px;padding:10px 14px;font-weight:650;cursor:pointer}}button.quiet{{background:#fff;color:#b42318;border:1px solid #f3c7c4;padding:7px 10px}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px 8px;border-bottom:1px solid #e8eaf0;vertical-align:top}}small{{color:#667085}}.notice{{color:#067647;font-weight:650}}</style></head><body>
+body{{max-width:960px;margin:40px auto;padding:0 18px;font:16px system-ui;color:#172033;background:#f7f8fc}}h1{{margin-bottom:4px}}.card{{background:white;border:1px solid #e4e7ef;border-radius:12px;padding:22px;margin:22px 0;box-shadow:0 1px 3px #00000008}}form.grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}}label{{font-size:13px;font-weight:650;display:grid;gap:5px}}input,select{{padding:10px;border:1px solid #b9c0cf;border-radius:7px;font:inherit}}.wide{{grid-column:1/-1}}fieldset{{border:0;padding:0;margin:0}}.platforms{{display:flex;gap:18px;margin-top:7px}}.platforms label{{display:flex;align-items:center;gap:7px;font-size:15px}}.platforms input{{padding:0}}#city-custom{{display:none}}#location-note{{color:#667085;font-size:13px}}button{{background:#3b5bdb;color:white;border:0;border-radius:7px;padding:10px 14px;font-weight:650;cursor:pointer}}button.quiet{{background:#fff;color:#b42318;border:1px solid #f3c7c4;padding:7px 10px}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px 8px;border-bottom:1px solid #e8eaf0;vertical-align:top}}small{{color:#667085}}.notice{{color:#067647;font-weight:650}}</style></head><body>
 <h1>Show Watcher</h1><p>District and PVR movie listing alerts, checked continuously while this server runs.</p>
 <div class='notice'>{html.escape(notice)}</div><section class=card><h2>Add a trigger</h2>
-<form class=grid method=post action='/add'><label>Provider<select name=provider><option value=district>District</option><option value=pvr>PVR Cinemas</option></select></label><label>Experience filter<select name=experience><option value=ALL>All experiences</option><option value=IMAX>IMAX</option><option value=4DX>4DX</option></select></label>
-<label class=wide>Movie page URL<input required type=url name=source_url placeholder='District or PVR movie page URL'></label>
+<form class=grid method=post action='/add'><fieldset class=wide><label>Platforms</label><div class=platforms><label><input checked type=checkbox name=platform value=district> District</label><label><input type=checkbox name=platform value=pvr> PVR Cinemas</label></div></fieldset>
+<label class=wide>District movie page URL<input type=url name=district_url placeholder='https://www.district.in/movies/...'></label><label class=wide>PVR movie page URL<input type=url name=pvr_url placeholder='https://www.pvrcinemas.com/moviesessions/...'></label>
+<label>Experience filter<select name=experience><option value=ALL>All experiences</option><option value=IMAX>IMAX</option><option value=4DX>4DX</option></select></label><label>City<select id=city-choice name=city_choice onchange='updateCity()'><option value=bengaluru>Bengaluru</option><option value=delhi>Delhi</option><option value=other>Other</option></select></label>
+<label class=wide id=city-custom>Custom city<input name=city_custom placeholder='Enter city name or city key'></label>
 <label>Movie name<input required name=name placeholder='The Odyssey'></label><label>Target date<input required type=date name=date></label>
-<label>City<input required name=city_key placeholder='bengaluru'></label><label>Frequency (minutes)<input required type=number min=5 name=frequency_minutes value=120></label>
-<label>Latitude<input required type=number step=any name=latitude placeholder='12.9636'></label><label>Longitude<input required type=number step=any name=longitude placeholder='77.6469'></label>
-<div class=wide><button>Add trigger</button></div></form></section><section class=card><h2>Active triggers</h2><table><thead><tr><th>Movie / schedule</th><th>City</th><th>Last check</th><th>Status</th><th></th></tr></thead><tbody>{rows}</tbody></table></section></body></html>"""
+<label>Frequency (minutes)<input required type=number min=5 name=frequency_minutes value=120></label><div></div>
+<label>Latitude<input required id=latitude type=number step=any name=latitude placeholder='Use current location or enter manually'></label><label>Longitude<input required id=longitude type=number step=any name=longitude placeholder='Use current location or enter manually'></label>
+<div class=wide id=location-note>Requesting your current location to prefill coordinates…</div><div class=wide><button>Add trigger(s)</button></div></form></section><section class=card><h2>Active triggers</h2><table><thead><tr><th>Movie / schedule</th><th>City</th><th>Last check</th><th>Status</th><th></th></tr></thead><tbody>{rows}</tbody></table></section><script>function updateCity(){{const other=document.getElementById('city-choice').value==='other';const custom=document.getElementById('city-custom');custom.style.display=other?'grid':'none';custom.querySelector('input').required=other}}function setLocationNote(message){{document.getElementById('location-note').textContent=message}}if(navigator.geolocation){{navigator.geolocation.getCurrentPosition(position=>{{const latitude=document.getElementById('latitude'),longitude=document.getElementById('longitude');if(!latitude.value)latitude.value=position.coords.latitude.toFixed(6);if(!longitude.value)longitude.value=position.coords.longitude.toFixed(6);setLocationNote('Coordinates prefilled from your current location. You can edit them.')}},()=>setLocationNote('Location was not shared. Enter latitude and longitude manually.'),{{enableHighAccuracy:false,timeout:10000}})}}else{{setLocationNote('Location is not supported by this browser. Enter coordinates manually.')}}</script></body></html>"""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -193,7 +195,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authenticate():
             return
         length = int(self.headers.get("Content-Length", "0"))
-        fields = {key: values[0].strip() for key, values in parse_qs(self.rfile.read(length).decode()).items()}
+        submitted = parse_qs(self.rfile.read(length).decode())
+        fields = {key: values[0].strip() for key, values in submitted.items()}
         try:
             with LOCK:
                 items = triggers()
@@ -201,11 +204,18 @@ class Handler(BaseHTTPRequestHandler):
                     frequency = int(fields["frequency_minutes"])
                     if frequency < 5:
                         raise ValueError("Frequency must be at least 5 minutes")
-                    provider = fields["provider"].lower()
-                    if provider not in {"district", "pvr"}:
-                        raise ValueError("Select District or PVR as the provider")
-                    items.append({"id": str(uuid.uuid4()), "provider": provider, "name": fields["name"], "source_url": fields["source_url"], "city_key": fields["city_key"].lower(), "date": fields["date"], "experience": fields.get("experience", "ALL").upper(), "latitude": float(fields["latitude"]), "longitude": float(fields["longitude"]), "frequency_minutes": frequency, "last_checked_at": None, "last_error": None})
-                    message = "Trigger added. It will be checked within 15 seconds."
+                    providers = submitted.get("platform", [])
+                    if not providers or any(provider not in {"district", "pvr"} for provider in providers):
+                        raise ValueError("Select District, PVR Cinemas, or both")
+                    city = fields.get("city_custom", "") if fields.get("city_choice") == "other" else fields.get("city_choice", "")
+                    if not city:
+                        raise ValueError("Select a city or enter a custom city")
+                    for provider in providers:
+                        source_url = fields.get(f"{provider}_url", "")
+                        if not source_url:
+                            raise ValueError(f"Provide the {provider.title()} movie page URL")
+                        items.append({"id": str(uuid.uuid4()), "provider": provider, "name": fields["name"], "source_url": source_url, "city_key": city.lower(), "city_name": city, "date": fields["date"], "experience": fields.get("experience", "ALL").upper(), "latitude": float(fields["latitude"]), "longitude": float(fields["longitude"]), "frequency_minutes": frequency, "last_checked_at": None, "last_error": None})
+                    message = f"{len(providers)} trigger{'s' if len(providers) != 1 else ''} added. They will be checked within 15 seconds."
                 elif self.path == "/delete":
                     items = [item for item in items if item["id"] != fields.get("id")]
                     message = "Trigger deleted."

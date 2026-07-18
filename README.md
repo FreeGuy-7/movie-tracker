@@ -7,6 +7,7 @@ A lightweight, dependency-free Python web app for watching movie listings. It cu
 Create your private configuration once, then run the dashboard:
 
 ```sh
+python3 -m pip install -r requirements.txt
 cp .env.example .env
 chmod 600 .env
 # Edit .env: add APP_PASSWORD and the three Discord webhook URLs.

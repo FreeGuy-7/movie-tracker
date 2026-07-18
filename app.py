@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import secrets
+import ssl
 import sys
 import time
 import uuid
@@ -21,6 +22,11 @@ from urllib.request import Request, urlopen
 
 from settings import load_environment
 
+try:
+    import certifi
+except ImportError:
+    certifi = None
+
 
 load_environment()
 
@@ -28,6 +34,7 @@ load_environment()
 DISTRICT_API_URL = "https://www.district.in/gw/consumer/movies/v5/movie"
 PVR_API_URL = "https://api3.pvrcinemas.com/api/v1/booking/content/msessions"
 IST = timezone(timedelta(hours=5, minutes=30), name="IST")
+TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where()) if certifi else ssl.create_default_context()
 SHOWTIME_KEYS = {"showtimes", "show_times", "shows", "sessions", "timings", "showtime"}
 VENUE_KEYS = {"cinema_name", "cinemaname", "venue_name", "venuename", "theatre_name", "theatrename"}
 
@@ -131,7 +138,7 @@ def fetch_district_listing(watch: dict[str, Any]) -> dict[str, Any]:
         },
     )
     try:
-        with urlopen(request, timeout=20) as response:
+        with urlopen(request, timeout=20, context=TLS_CONTEXT) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as error:
         raise RuntimeError(f"District returned HTTP {error.code}. The anonymous token is generated automatically; do not add browser cookies to the config.") from error
@@ -161,11 +168,13 @@ def fetch_pvr_listing(watch: dict[str, Any]) -> dict[str, Any]:
         method="POST",
     )
     try:
-        with urlopen(request, timeout=20) as response:
+        with urlopen(request, timeout=20, context=TLS_CONTEXT) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as error:
         raise RuntimeError(f"PVR returned HTTP {error.code}.") from error
     except (URLError, TimeoutError, json.JSONDecodeError) as error:
+        if certifi is None and "CERTIFICATE_VERIFY_FAILED" in str(error):
+            raise RuntimeError("PVR HTTPS verification failed. Install dependencies with: python3 -m pip install -r requirements.txt") from error
         raise RuntimeError(f"Unable to retrieve PVR listings: {error}") from error
 
 
@@ -323,7 +332,7 @@ def send_discord_text(webhook: str, message: str, mention: str = "") -> None:
             payload["allowed_mentions"] = {"parse": ["users", "roles", "everyone"]}
         body = json.dumps(payload).encode()
         request = Request(webhook, data=body, headers={"Content-Type": "application/json", "User-Agent": "show-listing-monitor/1.0"})
-        with urlopen(request, timeout=20):
+        with urlopen(request, timeout=20, context=TLS_CONTEXT):
             pass
 
 
