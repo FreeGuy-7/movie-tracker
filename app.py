@@ -12,6 +12,7 @@ import ssl
 import sys
 import time
 import uuid
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -57,6 +58,16 @@ def debug_log(event: str, **details: Any) -> None:
             handle.write(json.dumps(record, default=str) + "\n")
     except OSError:
         pass
+
+
+def discord_mention() -> str:
+    user_id = os.getenv("DISCORD_USER_ID", "").strip()
+    if user_id.isdigit():
+        return f"<@{user_id}>"
+    mention = os.getenv("DISCORD_MENTION", "@here").strip()
+    if mention.isdigit():
+        return f"<@{mention}>"
+    return mention or "@here"
 
 
 @dataclass(frozen=True)

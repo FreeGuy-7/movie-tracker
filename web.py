@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from app import Listing, debug_log, fetch_listing, format_listing_report, send_discord_text, summarize
+from app import Listing, debug_log, discord_mention, fetch_listing, format_listing_report, send_discord_text, summarize
 
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
@@ -88,7 +88,7 @@ def check(trigger: dict) -> None:
         if new_show_webhook and previous and new_items:
             examples = "\n".join(f"• {screen_format} — {venue}: {showtime}" for screen_format, venue, showtime in new_items[:10])
             suffix = "\n…" if len(new_items) > 10 else ""
-            send_discord_text(new_show_webhook, f"🚨 **New showtime{'s' if len(new_items) > 1 else ''} added for {trigger['name']}**\n{examples}{suffix}", os.getenv("DISCORD_MENTION", "@here"))
+            send_discord_text(new_show_webhook, f"🚨 **New showtime{'s' if len(new_items) > 1 else ''} added for {trigger['name']}**\n{examples}{suffix}", discord_mention())
         state[trigger["id"]] = {"signature": signature, "shows": current_items, "checked_at": now()}
         trigger["last_error"] = None
     except Exception as error:
