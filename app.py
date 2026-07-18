@@ -29,6 +29,7 @@ VENUE_KEYS = {"cinema_name", "cinemaname", "venue_name", "venuename", "theatre_n
 class Listing:
     venue: str
     showtimes: tuple[str, ...]
+    screen_format: str = "Standard"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -127,11 +128,22 @@ def find_listings(node: Any, inherited_venue: str = "Unknown venue") -> list[Lis
 def summarize(payload: dict[str, Any]) -> list[Listing]:
     district_listings: list[Listing] = []
     page_data = payload.get("pageData", {})
+    screen_formats = json.loads(payload.get("meta", {}).get("entityMetaData", {}).get("screen_format_dict", "{}"))
     for cinema in page_data.get("nearbyCinemas", []) + page_data.get("farCinemas", []):
         venue = cinema.get("cinemaInfo", {}).get("name", "Unknown venue")
-        showtimes = tuple(session["showTime"] for session in cinema.get("sessions", []) if session.get("showTime"))
-        if showtimes:
-            district_listings.append(Listing(venue, showtimes))
+        cinema_formats = screen_formats.get(str(cinema.get("id")), [])
+        sessions_by_format: dict[str, list[str]] = {}
+        for session in cinema.get("sessions", []):
+            showtime = session.get("showTime")
+            if not showtime:
+                continue
+            explicit_format = next((session.get(key) for key in ("screenFormat", "screen_format", "format", "experience") if session.get(key)), None)
+            audio = str(session.get("audi", ""))
+            detected = explicit_format or (audio if "imax" in audio.lower() or "4dx" in audio.lower() else None)
+            detected = detected or (cinema_formats[0] if len(cinema_formats) == 1 else "Standard")
+            normalized_format = normalize_screen_format(str(detected))
+            sessions_by_format.setdefault(normalized_format, []).append(showtime)
+        district_listings.extend(Listing(venue, tuple(times), screen_format) for screen_format, times in sessions_by_format.items())
     if district_listings:
         return district_listings
 
@@ -139,19 +151,45 @@ def summarize(payload: dict[str, Any]) -> list[Listing]:
     return [Listing(venue, times) for venue, times in sorted(unique)]
 
 
+def normalize_screen_format(value: str) -> str:
+    lowered = value.lower()
+    if "imax" in lowered:
+        return "IMAX"
+    if "4dx" in lowered:
+        return "4DX"
+    return value.strip() or "Standard"
+
+
 def load_state(path: Path) -> dict[str, Any]:
     return load_json(path) if path.exists() else {}
 
 
 def send_discord(webhook: str, watch: dict[str, Any], listings: list[Listing]) -> None:
-    lines = [f"**{watch['name']} is now listed in {watch['city_key'].title()}**", f"Date: {watch['date']}"]
-    lines.extend(f"• {item.venue}: {', '.join(item.showtimes[:8])}" for item in listings[:12])
-    lines.append(watch["district_url"])
-    send_discord_text(webhook, "\n".join(lines))
+    send_discord_text(webhook, format_listing_report(watch, listings))
 
 
-def send_discord_text(webhook: str, message: str) -> None:
-    body = json.dumps({"content": message}).encode()
+def format_listing_report(watch: dict[str, Any], listings: list[Listing]) -> str:
+    lines = [f"**{watch['name']} — {watch['date']}**", f"City: {watch['city_key'].title()}"]
+    grouped: dict[str, list[Listing]] = {}
+    for listing in listings:
+        grouped.setdefault(listing.screen_format, []).append(listing)
+    if not grouped:
+        lines.append("No showtimes are listed yet.")
+    for screen_format in sorted(grouped):
+        lines.append(f"\n**{screen_format}**")
+        for listing in sorted(grouped[screen_format], key=lambda item: item.venue):
+            lines.append(f"• **{listing.venue}**: {', '.join(listing.showtimes)}")
+    lines.append(f"\n{watch['district_url']}")
+    message = "\n".join(lines)
+    return message if len(message) <= 1900 else f"{message[:1890]}\n…"
+
+
+def send_discord_text(webhook: str, message: str, mention: str = "") -> None:
+    content = f"{mention}\n{message}".strip()
+    payload: dict[str, Any] = {"content": content}
+    if mention:
+        payload["allowed_mentions"] = {"parse": ["users", "roles", "everyone"]}
+    body = json.dumps(payload).encode()
     request = Request(webhook, data=body, headers={"Content-Type": "application/json", "User-Agent": "show-listing-monitor/1.0"})
     with urlopen(request, timeout=20):
         pass

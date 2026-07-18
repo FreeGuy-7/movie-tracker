@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from app import Listing, fetch_listing, send_discord, send_discord_text, summarize
+from app import Listing, fetch_listing, format_listing_report, send_discord_text, summarize
 
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
@@ -64,7 +64,11 @@ def bootstrap() -> None:
 
 
 def listing_signature(listings: list[Listing]) -> str:
-    return hashlib.sha256(json.dumps([(item.venue, item.showtimes) for item in listings]).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(listing_items(listings)).encode()).hexdigest()
+
+
+def listing_items(listings: list[Listing]) -> list[tuple[str, str, str]]:
+    return sorted((listing.screen_format, listing.venue, showtime) for listing in listings for showtime in listing.showtimes)
 
 
 def check(trigger: dict) -> None:
@@ -73,11 +77,17 @@ def check(trigger: dict) -> None:
         listings = summarize(fetch_listing(trigger))
         signature = listing_signature(listings)
         previous = state.get(trigger["id"], {})
-        if listings and previous and previous.get("signature") != signature:
-            webhook = os.getenv("DISCORD_WEBHOOK_URL")
-            if webhook:
-                send_discord(webhook, trigger, listings)
-        state[trigger["id"]] = {"signature": signature, "checked_at": now()}
+        current_items = listing_items(listings)
+        previous_items = {tuple(item) for item in previous.get("shows", [])}
+        new_items = [item for item in current_items if item not in previous_items]
+        webhook = os.getenv("DISCORD_WEBHOOK_URL")
+        if webhook:
+            send_discord_text(webhook, format_listing_report(trigger, listings))
+            if previous and new_items:
+                examples = "\n".join(f"• {screen_format} — {venue}: {showtime}" for screen_format, venue, showtime in new_items[:10])
+                suffix = "\n…" if len(new_items) > 10 else ""
+                send_discord_text(webhook, f"🚨 **New showtime{'s' if len(new_items) > 1 else ''} added for {trigger['name']}**\n{examples}{suffix}", os.getenv("DISCORD_MENTION", "@here"))
+        state[trigger["id"]] = {"signature": signature, "shows": current_items, "checked_at": now()}
         trigger["last_error"] = None
     except Exception as error:
         trigger["last_error"] = str(error)
