@@ -147,7 +147,11 @@ def send_discord(webhook: str, watch: dict[str, Any], listings: list[Listing]) -
     lines = [f"**{watch['name']} is now listed in {watch['city_key'].title()}**", f"Date: {watch['date']}"]
     lines.extend(f"• {item.venue}: {', '.join(item.showtimes[:8])}" for item in listings[:12])
     lines.append(watch["district_url"])
-    body = json.dumps({"content": "\n".join(lines)}).encode()
+    send_discord_text(webhook, "\n".join(lines))
+
+
+def send_discord_text(webhook: str, message: str) -> None:
+    body = json.dumps({"content": message}).encode()
     request = Request(webhook, data=body, headers={"Content-Type": "application/json", "User-Agent": "show-listing-monitor/1.0"})
     with urlopen(request, timeout=20):
         pass

@@ -17,13 +17,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from app import Listing, fetch_listing, send_discord, summarize
+from app import Listing, fetch_listing, send_discord, send_discord_text, summarize
 
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 TRIGGERS_PATH = DATA_DIR / "triggers.json"
 STATE_PATH = DATA_DIR / "state.json"
 LOCK = threading.Lock()
+LAST_HEARTBEAT = 0.0
 
 
 def now() -> str:
@@ -109,9 +110,27 @@ def run_due() -> None:
         LOCK.release()
 
 
+def send_heartbeat() -> None:
+    global LAST_HEARTBEAT
+    interval = max(1, int(os.getenv("HEARTBEAT_MINUTES", "60"))) * 60
+    if time.time() - LAST_HEARTBEAT < interval:
+        return
+    webhook = os.getenv("DISCORD_WEBHOOK_URL")
+    if not webhook:
+        return
+    items = triggers()
+    errors = sum(bool(item.get("last_error")) for item in items)
+    try:
+        send_discord_text(webhook, f"✅ **Show Watcher is running**\nActive triggers: {len(items)}\nTriggers with errors: {errors}\nUTC: {now()}")
+        LAST_HEARTBEAT = time.time()
+    except Exception as error:
+        print(f"Heartbeat failed: {error}")
+
+
 def scheduler() -> None:
     while True:
         run_due()
+        send_heartbeat()
         time.sleep(15)
 
 

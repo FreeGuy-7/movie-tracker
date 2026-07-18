@@ -6,7 +6,7 @@ A lightweight, dependency-free Python web app for watching movie listings. It cu
 
 Run `python3 web.py`, then open `http://localhost:8080`. Add a District movie URL, target date, city location, and a check frequency (minimum five minutes). The server checks each trigger continuously, persists it in `data/triggers.json`, and records listing state in `data/state.json`.
 
-Set `DISCORD_WEBHOOK_URL` before starting the server to enable notifications. The first successful check establishes a baseline; later listing changes notify Discord. Set `APP_PASSWORD` before exposing the dashboard publicly; it enables browser Basic Authentication with username `watcher`.
+Set `DISCORD_WEBHOOK_URL` before starting the server to enable notifications. The first successful check establishes a baseline; later listing changes notify Discord. The service also sends a running-status heartbeat every 60 minutes by default. For testing, set `HEARTBEAT_MINUTES=1`. Set `APP_PASSWORD` before exposing the dashboard publicly; it enables browser Basic Authentication with username `watcher`.
 
 Do not paste browser cookies, guest tokens, or request IDs into the app. District's anonymous token is generated for each request.
 
@@ -25,6 +25,7 @@ Example `/etc/show-watcher.env`:
 APP_PASSWORD=choose-a-strong-password
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 PORT=8080
+HEARTBEAT_MINUTES=60
 ```
 
 For the simplest managed demo, Render's free web services spin down after 15 minutes of inactivity, so they are not suitable for this continuous scheduler. Its always-on services are paid. [Render pricing overview](https://render.com/articles/how-much-does-cloud-application-hosting-cost-for-small-businesses). A Raspberry Pi or NAS already running at home is the practical zero-extra-cost alternative.
