@@ -74,7 +74,7 @@ def listing_items(listings: list[Listing]) -> list[tuple[str, str, str]]:
 def check(trigger: dict) -> None:
     state = load(STATE_PATH, {})
     try:
-        listings = summarize(fetch_listing(trigger))
+        listings = summarize(fetch_listing(trigger), trigger)
         signature = listing_signature(listings)
         previous = state.get(trigger["id"], {})
         current_items = listing_items(listings)
@@ -147,19 +147,20 @@ def scheduler() -> None:
 
 def page(items: list[dict], notice: str = "") -> str:
     rows = "".join(
-        f"<tr><td><strong>{html.escape(item['name'])}</strong><br><small>{html.escape(item['date'])} · every {item['frequency_minutes']} min</small></td>"
+        f"<tr><td><strong>{html.escape(item['name'])}</strong><br><small>{html.escape(item.get('provider', 'district').upper())} · {html.escape(item.get('experience', 'ALL'))} · {html.escape(item['date'])} · every {item['frequency_minutes']} min</small></td>"
         f"<td>{html.escape(item['city_key'].title())}</td><td>{html.escape(item.get('last_checked_at') or 'Not checked')}</td>"
         f"<td>{html.escape(item.get('last_error') or 'Healthy')}</td><td><form method='post' action='/delete'><input type='hidden' name='id' value='{item['id']}'><button class='quiet'>Delete</button></form></td></tr>"
         for item in items
     ) or "<tr><td colspan='5'>No triggers yet.</td></tr>"
     return f"""<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>
 <title>Show Watcher</title><style>
-body{{max-width:960px;margin:40px auto;padding:0 18px;font:16px system-ui;color:#172033;background:#f7f8fc}}h1{{margin-bottom:4px}}.card{{background:white;border:1px solid #e4e7ef;border-radius:12px;padding:22px;margin:22px 0;box-shadow:0 1px 3px #00000008}}form.grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}}label{{font-size:13px;font-weight:650;display:grid;gap:5px}}input{{padding:10px;border:1px solid #b9c0cf;border-radius:7px;font:inherit}}.wide{{grid-column:1/-1}}button{{background:#3b5bdb;color:white;border:0;border-radius:7px;padding:10px 14px;font-weight:650;cursor:pointer}}button.quiet{{background:#fff;color:#b42318;border:1px solid #f3c7c4;padding:7px 10px}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px 8px;border-bottom:1px solid #e8eaf0;vertical-align:top}}small{{color:#667085}}.notice{{color:#067647;font-weight:650}}</style></head><body>
-<h1>Show Watcher</h1><p>District movie listing alerts, checked continuously while this server runs.</p>
+body{{max-width:960px;margin:40px auto;padding:0 18px;font:16px system-ui;color:#172033;background:#f7f8fc}}h1{{margin-bottom:4px}}.card{{background:white;border:1px solid #e4e7ef;border-radius:12px;padding:22px;margin:22px 0;box-shadow:0 1px 3px #00000008}}form.grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}}label{{font-size:13px;font-weight:650;display:grid;gap:5px}}input,select{{padding:10px;border:1px solid #b9c0cf;border-radius:7px;font:inherit}}.wide{{grid-column:1/-1}}button{{background:#3b5bdb;color:white;border:0;border-radius:7px;padding:10px 14px;font-weight:650;cursor:pointer}}button.quiet{{background:#fff;color:#b42318;border:1px solid #f3c7c4;padding:7px 10px}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px 8px;border-bottom:1px solid #e8eaf0;vertical-align:top}}small{{color:#667085}}.notice{{color:#067647;font-weight:650}}</style></head><body>
+<h1>Show Watcher</h1><p>District and PVR movie listing alerts, checked continuously while this server runs.</p>
 <div class='notice'>{html.escape(notice)}</div><section class=card><h2>Add a trigger</h2>
-<form class=grid method=post action='/add'><label class=wide>District movie URL<input required type=url name=district_url placeholder='https://www.district.in/movies/...'></label>
+<form class=grid method=post action='/add'><label>Provider<select name=provider><option value=district>District</option><option value=pvr>PVR Cinemas</option></select></label><label>Experience filter<select name=experience><option value=ALL>All experiences</option><option value=IMAX>IMAX</option><option value=4DX>4DX</option></select></label>
+<label class=wide>Movie page URL<input required type=url name=source_url placeholder='District or PVR movie page URL'></label>
 <label>Movie name<input required name=name placeholder='The Odyssey'></label><label>Target date<input required type=date name=date></label>
-<label>City key<input required name=city_key placeholder='bengaluru'></label><label>Frequency (minutes)<input required type=number min=5 name=frequency_minutes value=120></label>
+<label>City<input required name=city_key placeholder='bengaluru'></label><label>Frequency (minutes)<input required type=number min=5 name=frequency_minutes value=120></label>
 <label>Latitude<input required type=number step=any name=latitude placeholder='12.9636'></label><label>Longitude<input required type=number step=any name=longitude placeholder='77.6469'></label>
 <div class=wide><button>Add trigger</button></div></form></section><section class=card><h2>Active triggers</h2><table><thead><tr><th>Movie / schedule</th><th>City</th><th>Last check</th><th>Status</th><th></th></tr></thead><tbody>{rows}</tbody></table></section></body></html>"""
 
@@ -200,7 +201,10 @@ class Handler(BaseHTTPRequestHandler):
                     frequency = int(fields["frequency_minutes"])
                     if frequency < 5:
                         raise ValueError("Frequency must be at least 5 minutes")
-                    items.append({"id": str(uuid.uuid4()), "name": fields["name"], "district_url": fields["district_url"], "city_key": fields["city_key"].lower(), "date": fields["date"], "latitude": float(fields["latitude"]), "longitude": float(fields["longitude"]), "frequency_minutes": frequency, "last_checked_at": None, "last_error": None})
+                    provider = fields["provider"].lower()
+                    if provider not in {"district", "pvr"}:
+                        raise ValueError("Select District or PVR as the provider")
+                    items.append({"id": str(uuid.uuid4()), "provider": provider, "name": fields["name"], "source_url": fields["source_url"], "city_key": fields["city_key"].lower(), "date": fields["date"], "experience": fields.get("experience", "ALL").upper(), "latitude": float(fields["latitude"]), "longitude": float(fields["longitude"]), "frequency_minutes": frequency, "last_checked_at": None, "last_error": None})
                     message = "Trigger added. It will be checked within 15 seconds."
                 elif self.path == "/delete":
                     items = [item for item in items if item["id"] != fields.get("id")]

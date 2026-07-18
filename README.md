@@ -15,6 +15,10 @@ python3 web.py
 
 Open `http://localhost:8080`. Add a District movie URL, target date, city location, and a check frequency (minimum five minutes). The server checks each trigger continuously, persists it in `data/triggers.json`, and records listing state in `data/state.json`.
 
+## Providers and experience filters
+
+Choose **District** or **PVR Cinemas** when adding a trigger. Use the public movie page URL, not a copied API request. PVR URLs look like `https://www.pvrcinemas.com/moviesessions/Bengaluru/THE-ODYSSEY/35098`; District URLs include the `frmtid` parameter. The experience filter supports **All experiences**, **IMAX**, and **4DX**. PVR passes the selected experience to its session API; District filters returned sessions before they are stored or notified.
+
 Configure three separate Discord webhook URLs in `.env`: `DISCORD_STATUS_WEBHOOK_URL` receives the service heartbeat, `DISCORD_TRIGGER_WEBHOOK_URL` receives every trigger-run report, and `DISCORD_NEW_SHOW_WEBHOOK_URL` receives tagged new-show alerts. You may point any of them to the same channel if desired. Trigger reports are grouped by format (such as IMAX or 4DX) and then cinema. District session times are converted to IST. Large reports are sent as consecutive Discord messages so no showtimes are removed. The first successful check establishes a baseline; later newly added showtimes generate a separate tagged alert. The default tag is `@here`; set `DISCORD_MENTION` to `<@your-user-id>` or a role mention to target a specific recipient. The service also sends a running-status heartbeat every 60 minutes by default. For testing, set `HEARTBEAT_MINUTES=1`. `APP_PASSWORD` enables browser Basic Authentication with username `watcher`.
 
 `.env` contains credentials and is ignored by Git. The committed `.env.example` is a safe template with no webhook URL. Docker deliberately does not copy `.env` into its image; use `--env-file` at runtime. On a VM, keep the same values in `/etc/show-watcher.env`, outside the repository, with `sudo chmod 600 /etc/show-watcher.env`.
@@ -56,7 +60,7 @@ docker run -d --restart unless-stopped -p 8080:8080 \
 
 ## Configuration
 
-`config.json` remains supported as a one-time bootstrap: its watches are loaded into the dashboard when `data/triggers.json` does not yet exist. After that, manage triggers from the UI.
+`config.json` remains supported as a one-time bootstrap: its watches are loaded into the dashboard when `data/triggers.json` does not yet exist. Each watch can set `provider` (`district` or `pvr`), `source_url`, and `experience` (`ALL`, `IMAX`, or `4DX`). After the first bootstrap, manage triggers from the UI.
 
 ## Extending providers
 

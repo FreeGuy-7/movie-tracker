@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 
 from settings import load_environment
@@ -25,7 +25,8 @@ from settings import load_environment
 load_environment()
 
 
-API_URL = "https://www.district.in/gw/consumer/movies/v5/movie"
+DISTRICT_API_URL = "https://www.district.in/gw/consumer/movies/v5/movie"
+PVR_API_URL = "https://api3.pvrcinemas.com/api/v1/booking/content/msessions"
 IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 SHOWTIME_KEYS = {"showtimes", "show_times", "shows", "sessions", "timings", "showtime"}
 VENUE_KEYS = {"cinema_name", "cinemaname", "venue_name", "venuename", "theatre_name", "theatrename"}
@@ -48,7 +49,7 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 def api_parameters(watch: dict[str, Any]) -> dict[str, str]:
-    source = urlparse(watch["district_url"])
+    source = urlparse(movie_url(watch))
     query = parse_qs(source.query)
     movie_code = query.get("frmtid", [None])[0]
     if not movie_code:
@@ -75,15 +76,52 @@ def api_parameters(watch: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def movie_url(watch: dict[str, Any]) -> str:
+    provider = watch.get("provider", "district")
+    return watch.get("source_url") or watch.get(f"{provider}_url") or watch["district_url"]
+
+
+def pvr_parameters(watch: dict[str, Any]) -> dict[str, Any]:
+    source = urlparse(movie_url(watch))
+    parts = [unquote(part) for part in source.path.split("/") if part]
+    if len(parts) < 4 or not parts[-1].isdigit():
+        raise ValueError("PVR URL must end with its numeric movie ID, such as /35098")
+    return {
+        "city": watch.get("city_name") or parts[-3],
+        "mid": parts[-1],
+        "experience": watch.get("experience", "ALL"),
+        "specialTag": "ALL",
+        "lat": str(watch["latitude"]),
+        "lng": str(watch["longitude"]),
+        "lang": "ALL",
+        "format": "ALL",
+        "dated": watch["date"],
+        "time": "08:00-24:00",
+        "cinetype": "ALL",
+        "hc": "ALL",
+        "adFree": False,
+        "bbt": False,
+    }
+
+
 def fetch_listing(watch: dict[str, Any]) -> dict[str, Any]:
+    provider = watch.get("provider", "district")
+    if provider == "pvr":
+        return fetch_pvr_listing(watch)
+    if provider != "district":
+        raise ValueError(f"Unsupported provider: {provider}")
+    return fetch_district_listing(watch)
+
+
+def fetch_district_listing(watch: dict[str, Any]) -> dict[str, Any]:
     from urllib.parse import urlencode
 
     request = Request(
-        f"{API_URL}?{urlencode(api_parameters(watch))}",
+        f"{DISTRICT_API_URL}?{urlencode(api_parameters(watch))}",
         headers={
             "Accept": "application/json, text/plain, */*",
             "api_source": "district",
-            "Referer": watch["district_url"],
+            "Referer": movie_url(watch),
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
             "x-app-type": "ed_web",
             "x-client-id": "district-web",
@@ -99,6 +137,36 @@ def fetch_listing(watch: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError(f"District returned HTTP {error.code}. The anonymous token is generated automatically; do not add browser cookies to the config.") from error
     except (URLError, TimeoutError, json.JSONDecodeError) as error:
         raise RuntimeError(f"Unable to retrieve District listings: {error}") from error
+
+
+def fetch_pvr_listing(watch: dict[str, Any]) -> dict[str, Any]:
+    parameters = pvr_parameters(watch)
+    body = json.dumps(parameters).encode()
+    request = Request(
+        PVR_API_URL,
+        data=body,
+        headers={
+            "Accept": "application/json, text/plain, */*",
+            "appversion": "1.0",
+            "authorization": "Bearer",
+            "chain": "PVR",
+            "city": str(parameters["city"]),
+            "content-type": "application/json",
+            "country": "INDIA",
+            "origin": "https://www.pvrcinemas.com",
+            "platform": "WEBSITE",
+            "Referer": movie_url(watch),
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        raise RuntimeError(f"PVR returned HTTP {error.code}.") from error
+    except (URLError, TimeoutError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Unable to retrieve PVR listings: {error}") from error
 
 
 def strings(value: Any) -> list[str]:
@@ -131,7 +199,14 @@ def find_listings(node: Any, inherited_venue: str = "Unknown venue") -> list[Lis
     return listings
 
 
-def summarize(payload: dict[str, Any]) -> list[Listing]:
+def summarize(payload: dict[str, Any], watch: dict[str, Any] | None = None) -> list[Listing]:
+    watch = watch or {}
+    if watch.get("provider") == "pvr":
+        return summarize_pvr(payload, watch.get("experience", "ALL"))
+    return summarize_district(payload, watch.get("experience", "ALL"))
+
+
+def summarize_district(payload: dict[str, Any], experience: str) -> list[Listing]:
     district_listings: list[Listing] = []
     page_data = payload.get("pageData", {})
     screen_formats = json.loads(payload.get("meta", {}).get("entityMetaData", {}).get("screen_format_dict", "{}"))
@@ -148,13 +223,33 @@ def summarize(payload: dict[str, Any]) -> list[Listing]:
             detected = explicit_format or (audio if "imax" in audio.lower() or "4dx" in audio.lower() else None)
             detected = detected or (cinema_formats[0] if len(cinema_formats) == 1 else "Standard")
             normalized_format = normalize_screen_format(str(detected))
+            if not matches_experience(normalized_format, experience):
+                continue
             sessions_by_format.setdefault(normalized_format, []).append(showtime)
         district_listings.extend(Listing(venue, tuple(times), screen_format) for screen_format, times in sessions_by_format.items())
     if district_listings:
         return district_listings
 
     unique = {(listing.venue, listing.showtimes) for listing in find_listings(payload)}
-    return [Listing(venue, times) for venue, times in sorted(unique)]
+    return [Listing(venue, times) for venue, times in sorted(unique) if matches_experience("Standard", experience)]
+
+
+def summarize_pvr(payload: dict[str, Any], experience: str) -> list[Listing]:
+    listings: list[Listing] = []
+    cinemas = payload.get("output", {}).get("movieCinemaSessions", [])
+    for cinema_session in cinemas:
+        venue = cinema_session.get("cinema", {}).get("name", "Unknown venue")
+        grouped: dict[str, list[str]] = {}
+        for experience_session in cinema_session.get("experienceSessions", []):
+            experience_name = str(experience_session.get("experience", "Standard"))
+            for show in experience_session.get("shows", []):
+                screen_format = normalize_screen_format(str(show.get("screenType") or show.get("filmFormat") or experience_name))
+                if matches_experience(f"{experience_name} {screen_format}", experience):
+                    showtime = show.get("showTime")
+                    if showtime:
+                        grouped.setdefault(screen_format, []).append(str(showtime))
+        listings.extend(Listing(venue, tuple(times), screen_format) for screen_format, times in grouped.items())
+    return listings
 
 
 def normalize_screen_format(value: str) -> str:
@@ -164,6 +259,10 @@ def normalize_screen_format(value: str) -> str:
     if "4dx" in lowered:
         return "4DX"
     return value.strip() or "Standard"
+
+
+def matches_experience(value: str, selected: str) -> bool:
+    return selected.upper() == "ALL" or selected.lower() in value.lower()
 
 
 def load_state(path: Path) -> dict[str, Any]:
@@ -192,7 +291,7 @@ def format_listing_report(watch: dict[str, Any], listings: list[Listing]) -> str
         for listing in sorted(grouped[screen_format], key=lambda item: item.venue):
             times = " · ".join(format_showtime(showtime) for showtime in listing.showtimes)
             lines.append(f"**{listing.venue}**\n↳ {times}")
-    lines.append(f"\n🔗 {watch['district_url']}")
+    lines.append(f"\n🔗 {movie_url(watch)}")
     return "\n".join(lines)
 
 
@@ -213,7 +312,7 @@ def format_showtime(value: str) -> str:
         period = "AM" if local.hour < 12 else "PM"
         return f"{hour}:{local.minute:02d} {period} IST"
     except ValueError:
-        return value
+        return value if value.endswith("IST") else f"{value} IST"
 
 
 def send_discord_text(webhook: str, message: str, mention: str = "") -> None:
@@ -254,7 +353,7 @@ def run(config: dict[str, Any], state_path: Path, notify: bool) -> int:
     updated_state: dict[str, Any] = {}
     for watch in config["watches"]:
         payload = fetch_listing(watch)
-        listings = summarize(payload)
+        listings = summarize(payload, watch)
         signature = hashlib.sha256(json.dumps([(item.venue, item.showtimes) for item in listings]).encode()).hexdigest()
         previous = state.get(watch["name"], {})
         is_new_listing = bool(listings) and previous.get("signature") != signature
